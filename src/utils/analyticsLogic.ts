@@ -1,4 +1,5 @@
 import {
+  DIRECTION_LABELS,
   DocumentDirection,
   DocumentPurpose,
   DocumentRecord,
@@ -52,6 +53,18 @@ export interface CategoryCountPoint {
   key: string;
   label: string;
   count: number;
+}
+
+export interface DirectionSharePoint {
+  direction: DocumentDirection;
+  label: string;
+  count: number;
+  percentage: number;
+}
+
+export interface DirectionDistributionResult {
+  total: number;
+  items: DirectionSharePoint[];
 }
 
 export interface AnalyticsSummary {
@@ -230,5 +243,43 @@ export function computeAnalyticsSummary(
     peakMonthCount,
     averagePerActiveMonth:
       activeMonths > 0 ? Number((totalDocuments / activeMonths).toFixed(1)) : 0,
+  };
+}
+
+const ORDERED_DIRECTIONS: DocumentDirection[] = [
+  DocumentDirection.INCOMING,
+  DocumentDirection.OUTGOING,
+  DocumentDirection.LEGAL,
+  DocumentDirection.SPEECH,
+];
+
+export function aggregateDirectionDistribution(
+  records: DocumentRecord[],
+  selectedYear: string
+): DirectionDistributionResult {
+  const counts = new Map<DocumentDirection, number>();
+  for (const dir of ORDERED_DIRECTIONS) {
+    counts.set(dir, 0);
+  }
+
+  let total = 0;
+  for (const doc of records) {
+    if (selectedYear !== 'all' && !doc.docDate.startsWith(`${selectedYear}-`)) continue;
+    counts.set(doc.direction, (counts.get(doc.direction) ?? 0) + 1);
+    total += 1;
+  }
+
+  return {
+    total,
+    items: ORDERED_DIRECTIONS.map((direction) => {
+      const count = counts.get(direction) ?? 0;
+      const percentage = total > 0 ? Number(((count / total) * 100).toFixed(1)) : 0;
+      return {
+        direction,
+        label: DIRECTION_LABELS[direction],
+        count,
+        percentage,
+      };
+    }),
   };
 }

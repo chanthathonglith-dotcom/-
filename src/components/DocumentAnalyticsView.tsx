@@ -6,6 +6,8 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -16,12 +18,14 @@ import { DocumentDirection, DocumentRecord } from '../types/document';
 import {
   aggregateByPurpose,
   aggregateByStatus,
+  aggregateDirectionDistribution,
   aggregateMonthlyDocuments,
   computeAnalyticsSummary,
+  DirectionSharePoint,
   extractAvailableYears,
 } from '../utils/analyticsLogic';
 import { ThemeMode } from '../utils/themeLogic';
-import { ChannelEmblem } from './AppLogo';
+import { CHANNEL_VISUALS, ChannelEmblem } from './AppLogo';
 
 interface DocumentAnalyticsViewProps {
   documents: DocumentRecord[];
@@ -39,6 +43,9 @@ interface CustomTooltipPayloadItem {
     monthFullLabel?: string;
     label?: string;
     total?: number;
+    percentage?: number;
+    count?: number;
+    direction?: DocumentDirection;
   };
 }
 
@@ -92,6 +99,29 @@ const PurposeTooltip: React.FC<{
   );
 };
 
+const DirectionPieTooltip: React.FC<{
+  active?: boolean;
+  payload?: CustomTooltipPayloadItem[];
+}> = ({ active, payload }) => {
+  if (!active || !payload || payload.length === 0) return null;
+  const point = payload[0]?.payload;
+  if (!point) return null;
+  return (
+    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg px-3.5 py-2.5 shadow-md text-xs space-y-1">
+      <div className="flex items-center gap-2 font-bold text-slate-900 dark:text-slate-100">
+        {point.direction && <ChannelEmblem direction={point.direction} size="xs" />}
+        <span>{point.label}</span>
+      </div>
+      <div className="flex items-center justify-between gap-4 font-mono-tabular">
+        <span className="text-slate-600 dark:text-slate-300">{point.count ?? 0} ສະບັບ</span>
+        <span className="font-bold text-slate-900 dark:text-slate-100">
+          {(point.percentage ?? 0).toFixed(1)}%
+        </span>
+      </div>
+    </div>
+  );
+};
+
 export const DocumentAnalyticsView: React.FC<DocumentAnalyticsViewProps> = ({
   documents,
   onFilterByMonth,
@@ -101,6 +131,7 @@ export const DocumentAnalyticsView: React.FC<DocumentAnalyticsViewProps> = ({
   const availableYears = useMemo(() => extractAvailableYears(documents), [documents]);
   const [selectedYear, setSelectedYear] = useState<string>(() => availableYears[0] || 'all');
   const [chartMode, setChartMode] = useState<ChartMode>('bar');
+  const [hoveredDirection, setHoveredDirection] = useState<DocumentDirection | null>(null);
 
   const effectiveYear =
     selectedYear !== 'all' && !availableYears.includes(selectedYear)
@@ -122,24 +153,58 @@ export const DocumentAnalyticsView: React.FC<DocumentAnalyticsViewProps> = ({
     [documents, effectiveYear]
   );
 
+  const directionDistribution = useMemo(
+    () => aggregateDirectionDistribution(documents, effectiveYear),
+    [documents, effectiveYear]
+  );
+
   const summary = useMemo(() => computeAnalyticsSummary(monthlyData), [monthlyData]);
   const activeMonths = useMemo(
     () => monthlyData.filter((m) => m.total > 0),
     [monthlyData]
   );
 
-  const incomingColor = isDark ? '#3B82F6' : '#1D4ED8';
-  const outgoingColor = isDark ? '#14B8A6' : '#0F766E';
-  const legalColor = isDark ? '#818CF8' : '#4338CA';
-  const speechColor = isDark ? '#FBBF24' : '#D97706';
+  const incomingColor = isDark
+    ? CHANNEL_VISUALS[DocumentDirection.INCOMING].chartColorDark
+    : CHANNEL_VISUALS[DocumentDirection.INCOMING].chartColorLight;
+  const outgoingColor = isDark
+    ? CHANNEL_VISUALS[DocumentDirection.OUTGOING].chartColorDark
+    : CHANNEL_VISUALS[DocumentDirection.OUTGOING].chartColorLight;
+  const legalColor = isDark
+    ? CHANNEL_VISUALS[DocumentDirection.LEGAL].chartColorDark
+    : CHANNEL_VISUALS[DocumentDirection.LEGAL].chartColorLight;
+  const speechColor = isDark
+    ? CHANNEL_VISUALS[DocumentDirection.SPEECH].chartColorDark
+    : CHANNEL_VISUALS[DocumentDirection.SPEECH].chartColorLight;
+
   const gridStroke = isDark ? '#1E293B' : '#E2E8F0';
   const axisStroke = isDark ? '#334155' : '#CBD5E1';
   const tickColor = isDark ? '#94A3B8' : '#475569';
   const cursorFill = isDark ? '#1E293B' : '#F1F5F9';
 
   const purposeColors = isDark
-    ? ['#94A3B8', '#3B82F6', '#F59E0B', '#14B8A6']
-    : ['#475569', '#1D4ED8', '#D97706', '#0F766E'];
+    ? ['#94A3B8', '#38BDF8', '#FB923C', '#2DD4BF']
+    : ['#475569', '#2563EB', '#EA580C', '#0D9488'];
+
+  const pieSlices = useMemo(
+    () =>
+      directionDistribution.items
+        .filter((item) => item.count > 0)
+        .map((item) => ({
+          ...item,
+          color: isDark
+            ? CHANNEL_VISUALS[item.direction].chartColorDark
+            : CHANNEL_VISUALS[item.direction].chartColorLight,
+        })),
+    [directionDistribution.items, isDark]
+  );
+
+  const activeDirectionItem: DirectionSharePoint | null = useMemo(() => {
+    if (!hoveredDirection) return null;
+    return (
+      directionDistribution.items.find((item) => item.direction === hoveredDirection) ?? null
+    );
+  }, [directionDistribution.items, hoveredDirection]);
 
   if (documents.length === 0) {
     return (
@@ -226,18 +291,26 @@ export const DocumentAnalyticsView: React.FC<DocumentAnalyticsViewProps> = ({
         <div className="bg-white dark:bg-slate-900 p-4 sm:p-5">
           <div className="text-xs text-slate-500 dark:text-slate-400">ຂາເຂົ້າ / ຂາອອກ</div>
           <div className="text-2xl font-bold font-mono-tabular text-slate-900 dark:text-slate-100 mt-1">
-            <span className="text-blue-700 dark:text-blue-400">{summary.totalIncoming}</span>
+            <span className={CHANNEL_VISUALS[DocumentDirection.INCOMING].accentTextClass}>
+              {summary.totalIncoming}
+            </span>
             <span className="text-slate-300 dark:text-slate-600 mx-1.5">/</span>
-            <span className="text-teal-700 dark:text-teal-400">{summary.totalOutgoing}</span>
+            <span className={CHANNEL_VISUALS[DocumentDirection.OUTGOING].accentTextClass}>
+              {summary.totalOutgoing}
+            </span>
           </div>
         </div>
 
         <div className="bg-white dark:bg-slate-900 p-4 sm:p-5">
           <div className="text-xs text-slate-500 dark:text-slate-400">ນິຕິກຳ / ບົດໂອ້ລົມ</div>
           <div className="text-2xl font-bold font-mono-tabular text-slate-900 dark:text-slate-100 mt-1">
-            <span className="text-indigo-700 dark:text-indigo-400">{summary.totalLegal}</span>
+            <span className={CHANNEL_VISUALS[DocumentDirection.LEGAL].accentTextClass}>
+              {summary.totalLegal}
+            </span>
             <span className="text-slate-300 dark:text-slate-600 mx-1.5">/</span>
-            <span className="text-amber-700 dark:text-amber-400">{summary.totalSpeech}</span>
+            <span className={CHANNEL_VISUALS[DocumentDirection.SPEECH].accentTextClass}>
+              {summary.totalSpeech}
+            </span>
           </div>
         </div>
 
@@ -398,8 +471,140 @@ export const DocumentAnalyticsView: React.FC<DocumentAnalyticsViewProps> = ({
         </div>
       </section>
 
-      {/* Secondary Breakdown: Purpose Chart + Monthly Breakdown Table */}
+      {/* Secondary Breakdown: Direction Share Pie Chart + Purpose Chart */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <section
+          aria-label="ກຣາຟວົງມົນສະແດງອັດຕາສ່ວນປະເພດເອກະສານ"
+          data-testid="direction-pie-section"
+          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col justify-between gap-4"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                ອັດຕາສ່ວນປະເພດເອກະສານທຽບໃສ່ຈຳນວນລວມ
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                ຂາເຂົ້າ, ຂາອອກ, ນິຕິກຳ ແລະ ບົດໂອ້ລົມ ({effectiveYear === 'all' ? 'ທຸກປີ' : `ປີ ${effectiveYear}`} · ລວມ{' '}
+                <span className="font-mono-tabular font-semibold text-slate-700 dark:text-slate-200">
+                  {directionDistribution.total}
+                </span>{' '}
+                ສະບັບ)
+              </p>
+            </div>
+            <ChannelEmblem direction="analytics" size="sm" />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-5 items-center flex-1">
+            <div className="sm:col-span-5 relative h-[220px] w-full flex items-center justify-center" data-testid="direction-pie-chart">
+              {directionDistribution.total > 0 ? (
+                <>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={pieSlices}
+                        dataKey="count"
+                        nameKey="label"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={56}
+                        outerRadius={86}
+                        paddingAngle={pieSlices.length > 1 ? 3 : 0}
+                        cornerRadius={pieSlices.length > 1 ? 5 : 0}
+                        stroke={isDark ? '#0F172A' : '#FFFFFF'}
+                        strokeWidth={2}
+                        isAnimationActive={false}
+                        onMouseEnter={(_, index) => {
+                          const target = pieSlices[index];
+                          if (target) setHoveredDirection(target.direction);
+                        }}
+                        onMouseLeave={() => setHoveredDirection(null)}
+                      >
+                        {pieSlices.map((entry) => {
+                          const dimmed =
+                            hoveredDirection !== null && hoveredDirection !== entry.direction;
+                          return (
+                            <Cell
+                              key={entry.direction}
+                              fill={entry.color}
+                              fillOpacity={dimmed ? 0.35 : 1}
+                              style={{ transition: 'fill-opacity 150ms ease' }}
+                            />
+                          );
+                        })}
+                      </Pie>
+                      <Tooltip content={<DirectionPieTooltip />} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-3">
+                    <span className="text-2xl font-bold font-mono-tabular text-slate-900 dark:text-slate-100 leading-tight">
+                      {activeDirectionItem
+                        ? `${activeDirectionItem.percentage.toFixed(1)}%`
+                        : directionDistribution.total}
+                    </span>
+                    <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mt-0.5 max-w-[92px] truncate">
+                      {activeDirectionItem ? activeDirectionItem.label : 'ສະບັບລວມ'}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div className="w-40 h-40 rounded-full border-4 border-dashed border-slate-200 dark:border-slate-700 flex flex-col items-center justify-center text-center">
+                  <span className="text-xl font-bold font-mono-tabular text-slate-400 dark:text-slate-500">
+                    0
+                  </span>
+                  <span className="text-xs text-slate-400 dark:text-slate-500">ບໍ່ມີຂໍ້ມູນ</span>
+                </div>
+              )}
+            </div>
+
+            <div className="sm:col-span-7 divide-y divide-slate-100 dark:divide-slate-800/80" data-testid="direction-pie-breakdown">
+              {directionDistribution.items.map((item) => {
+                const visual = CHANNEL_VISUALS[item.direction];
+                const isHighlighted = hoveredDirection === item.direction;
+                return (
+                  <div
+                    key={item.direction}
+                    onMouseEnter={() => setHoveredDirection(item.direction)}
+                    onMouseLeave={() => setHoveredDirection(null)}
+                    className={`py-2.5 px-2.5 rounded-lg transition-colors ${
+                      isHighlighted ? 'bg-slate-50 dark:bg-slate-800/70' : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <ChannelEmblem direction={item.direction} size="xs" />
+                        <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
+                          {item.label}
+                        </span>
+                      </div>
+                      <div className="flex items-baseline gap-2.5 shrink-0 font-mono-tabular">
+                        <span className="text-xs text-slate-500 dark:text-slate-400">
+                          {item.count} ສະບັບ
+                        </span>
+                        <span className={`text-sm font-bold min-w-[46px] text-right ${visual.accentTextClass}`}>
+                          {item.percentage.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                    <div
+                      className="mt-2 h-1.5 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden"
+                      aria-hidden="true"
+                    >
+                      <div
+                        className={`h-full rounded-full ${visual.progressBarClass}`}
+                        style={{
+                          width: `${item.percentage}%`,
+                          minWidth: item.count > 0 ? '4px' : undefined,
+                          transition: 'width 200ms cubic-bezier(0.16, 1, 0.3, 1)',
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
         <section
           aria-label="ກຣາຟສະຖິຕິຕາມຈຸດປະສົງ"
           className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4"
@@ -454,84 +659,85 @@ export const DocumentAnalyticsView: React.FC<DocumentAnalyticsViewProps> = ({
             ))}
           </div>
         </section>
-
-        <section
-          aria-label="ຕາຕະລາງສະຫຼຸບລາຍເດືອນ"
-          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col"
-        >
-          <div className="p-5 pb-3">
-            <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">ສະຫຼຸບຈຳນວນລາຍເດືອນ</h2>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              ກົດທີ່ແຖວເດືອນເພື່ອເປີດເບິ່ງລາຍການເອກະສານຂອງເດືອນນັ້ນ
-            </p>
-          </div>
-
-          <div className="overflow-x-auto flex-1">
-            <table className="w-full text-left border-collapse text-sm">
-              <thead>
-                <tr className="border-y border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  <th scope="col" className="py-2.5 pl-5 pr-3">
-                    ເດືອນ
-                  </th>
-                  <th scope="col" className="py-2.5 px-2.5 text-right whitespace-nowrap">
-                    ຂາເຂົ້າ
-                  </th>
-                  <th scope="col" className="py-2.5 px-2.5 text-right whitespace-nowrap">
-                    ຂາອອກ
-                  </th>
-                  <th scope="col" className="py-2.5 px-2.5 text-right whitespace-nowrap">
-                    ນິຕິກຳ
-                  </th>
-                  <th scope="col" className="py-2.5 px-2.5 text-right whitespace-nowrap">
-                    ບົດໂອ້ລົມ
-                  </th>
-                  <th scope="col" className="py-2.5 px-2.5 text-right whitespace-nowrap">
-                    ລວມ
-                  </th>
-                  <th scope="col" className="py-2.5 pl-2 pr-5 text-right whitespace-nowrap">
-                    ເບິ່ງຂໍ້ມູນ
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-                {activeMonths.map((row) => (
-                  <tr key={row.monthKey} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                    <td className="py-2.5 pl-5 pr-3 font-medium text-slate-900 dark:text-slate-100 whitespace-nowrap">
-                      {row.monthFullLabel}
-                    </td>
-                    <td className="py-2.5 px-2.5 text-right font-mono-tabular text-blue-700 dark:text-blue-400 font-semibold">
-                      {row.incoming}
-                    </td>
-                    <td className="py-2.5 px-2.5 text-right font-mono-tabular text-teal-700 dark:text-teal-400 font-semibold">
-                      {row.outgoing}
-                    </td>
-                    <td className="py-2.5 px-2.5 text-right font-mono-tabular text-indigo-700 dark:text-indigo-400 font-semibold">
-                      {row.legal}
-                    </td>
-                    <td className="py-2.5 px-2.5 text-right font-mono-tabular text-amber-700 dark:text-amber-400 font-semibold">
-                      {row.speech}
-                    </td>
-                    <td className="py-2.5 px-2.5 text-right font-mono-tabular text-slate-900 dark:text-slate-100 font-bold">
-                      {row.total}
-                    </td>
-                    <td className="py-2.5 pl-2 pr-5 text-right whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => onFilterByMonth(row.monthKey)}
-                        aria-label={`ເບິ່ງເອກະສານເດືອນ ${row.monthFullLabel}`}
-                        className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 dark:text-blue-400 hover:underline py-1"
-                      >
-                        <span>ເປີດເບິ່ງ</span>
-                        <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
       </div>
+
+      {/* Full-Width Monthly Breakdown Table */}
+      <section
+        aria-label="ຕາຕະລາງສະຫຼຸບລາຍເດືອນ"
+        className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col"
+      >
+        <div className="p-5 pb-3">
+          <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">ສະຫຼຸບຈຳນວນລາຍເດືອນ</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            ກົດທີ່ແຖວເດືອນເພື່ອເປີດເບິ່ງລາຍການເອກະສານຂອງເດືອນນັ້ນ
+          </p>
+        </div>
+
+        <div className="overflow-x-auto flex-1">
+          <table className="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr className="border-y border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-800/60 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                <th scope="col" className="py-2.5 pl-5 pr-3">
+                  ເດືອນ
+                </th>
+                <th scope="col" className="py-2.5 px-3 text-right whitespace-nowrap">
+                  ຂາເຂົ້າ
+                </th>
+                <th scope="col" className="py-2.5 px-3 text-right whitespace-nowrap">
+                  ຂາອອກ
+                </th>
+                <th scope="col" className="py-2.5 px-3 text-right whitespace-nowrap">
+                  ນິຕິກຳ
+                </th>
+                <th scope="col" className="py-2.5 px-3 text-right whitespace-nowrap">
+                  ບົດໂອ້ລົມ
+                </th>
+                <th scope="col" className="py-2.5 px-3 text-right whitespace-nowrap">
+                  ລວມ
+                </th>
+                <th scope="col" className="py-2.5 pl-2 pr-5 text-right whitespace-nowrap">
+                  ເບິ່ງຂໍ້ມູນ
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+              {activeMonths.map((row) => (
+                <tr key={row.monthKey} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
+                  <td className="py-2.5 pl-5 pr-3 font-medium text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                    {row.monthFullLabel}
+                  </td>
+                  <td className={`py-2.5 px-3 text-right font-mono-tabular font-semibold ${CHANNEL_VISUALS[DocumentDirection.INCOMING].accentTextClass}`}>
+                    {row.incoming}
+                  </td>
+                  <td className={`py-2.5 px-3 text-right font-mono-tabular font-semibold ${CHANNEL_VISUALS[DocumentDirection.OUTGOING].accentTextClass}`}>
+                    {row.outgoing}
+                  </td>
+                  <td className={`py-2.5 px-3 text-right font-mono-tabular font-semibold ${CHANNEL_VISUALS[DocumentDirection.LEGAL].accentTextClass}`}>
+                    {row.legal}
+                  </td>
+                  <td className={`py-2.5 px-3 text-right font-mono-tabular font-semibold ${CHANNEL_VISUALS[DocumentDirection.SPEECH].accentTextClass}`}>
+                    {row.speech}
+                  </td>
+                  <td className="py-2.5 px-3 text-right font-mono-tabular text-slate-900 dark:text-slate-100 font-bold">
+                    {row.total}
+                  </td>
+                  <td className="py-2.5 pl-2 pr-5 text-right whitespace-nowrap">
+                    <button
+                      type="button"
+                      onClick={() => onFilterByMonth(row.monthKey)}
+                      aria-label={`ເບິ່ງເອກະສານເດືອນ ${row.monthFullLabel}`}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 dark:text-blue-400 hover:underline py-1"
+                    >
+                      <span>ເປີດເບິ່ງ</span>
+                      <ArrowRight className="w-3.5 h-3.5" aria-hidden="true" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 };

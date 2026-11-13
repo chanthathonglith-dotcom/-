@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  BarChart3,
   LogOut,
   QrCode,
   Settings,
@@ -102,14 +101,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'analytics',
       label: 'ສະຖິຕິ & ກຣາຟລາຍເດືອນ',
       count: stats.total,
-      icon: (
-        <span
-          className="w-5 h-5 rounded inline-flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200/80 dark:bg-emerald-950/70 dark:text-emerald-300 dark:ring-emerald-800/70"
-          aria-hidden="true"
-        >
-          <BarChart3 className="w-3 h-3" aria-hidden="true" />
-        </span>
-      ),
+      icon: <ChannelEmblem direction="analytics" size="xs" />,
     },
   ];
 

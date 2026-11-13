@@ -1,12 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BadgeCheck, ExternalLink, FileText, Pencil, PenTool, Printer, Trash2, X } from 'lucide-react';
+import { BadgeCheck, Check, Copy, ExternalLink, FileText, Pencil, PenTool, Printer, Trash2, X } from 'lucide-react';
 import { DIRECTION_LABELS, DocumentDirection, DocumentRecord } from '../types/document';
 import {
   formatLaoDisplayDate,
   getEffectiveIncomingDate,
   getEffectiveOutgoingDate,
 } from '../utils/documentLogic';
+import {
+  copyTextToClipboard,
+  formatDocumentDetailsForClipboard,
+} from '../utils/documentCopyLogic';
 import { buildPrintableDocumentSummary } from '../utils/documentPrintLogic';
 import { buildDocumentQrPayload, generateQrCodeDataUrl } from '../utils/qrCodeLogic';
 import { formatSignatureTimestamp, isValidSignatureDataUrl } from '../utils/signatureLogic';
@@ -31,6 +35,11 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
   onDelete,
 }) => {
   const [printQrDataUrl, setPrintQrDataUrl] = useState<string>('');
+  const [copiedDetails, setCopiedDetails] = useState(false);
+
+  useEffect(() => {
+    setCopiedDetails(false);
+  }, [record?.id]);
 
   useEffect(() => {
     if (!record) return;
@@ -83,6 +92,27 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
   const handlePrintDetails = () => {
     if (typeof window !== 'undefined' && typeof window.print === 'function') {
       window.print();
+    }
+  };
+
+  const handleCopyAllDetails = async () => {
+    const formatted = formatDocumentDetailsForClipboard(record, trackingQrPayload);
+    const didCopy = await copyTextToClipboard(formatted);
+
+    if (didCopy) {
+      setCopiedDetails(true);
+      onNotifyToast?.({
+        variant: 'success',
+        title: 'ສຳເນົາຂໍ້ມູນສຳເລັດ',
+        description: `ສຳເນົາຂໍ້ມູນເອກະສານ "${record.docNumber}" ລົງ Clipboard ແລ້ວ`,
+      });
+      window.setTimeout(() => setCopiedDetails(false), 1800);
+    } else {
+      onNotifyToast?.({
+        variant: 'error',
+        title: 'ບໍ່ສາມາດສຳເນົາຂໍ້ມູນໄດ້',
+        description: 'ກະລຸນາລອງໃໝ່ອີກຄັ້ງ ຫຼື ຄັດລອກຂໍ້ຄວາມດ້ວຍຕົນເອງ',
+      });
     }
   };
 
@@ -443,6 +473,20 @@ export const DocumentDetailModal: React.FC<DocumentDetailModalProps> = ({
             </button>
 
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                data-testid="detail-copy-all-btn"
+                aria-label="ສຳເນົາຂໍ້ມູນເອກະສານທັງໝົດ"
+                onClick={handleCopyAllDetails}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[40px] text-sm font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 rounded-lg transition-colors whitespace-nowrap shrink-0"
+              >
+                {copiedDetails ? (
+                  <Check className="w-4 h-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                ) : (
+                  <Copy className="w-4 h-4" aria-hidden="true" />
+                )}
+                <span>{copiedDetails ? 'ສຳເນົາແລ້ວ' : 'ສຳເນົາຂໍ້ມູນ'}</span>
+              </button>
               <button
                 type="button"
                 data-testid="detail-print-btn"

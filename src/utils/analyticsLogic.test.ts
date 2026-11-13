@@ -9,6 +9,7 @@ import {
 import {
   aggregateByPurpose,
   aggregateByStatus,
+  aggregateDirectionDistribution,
   aggregateMonthlyDocuments,
   computeAnalyticsSummary,
   extractAvailableYears,
@@ -89,4 +90,25 @@ test('aggregateByPurpose and aggregateByStatus count categories for selected yea
 
   const statuses = aggregateByStatus(records, '2026');
   assert.equal(statuses.find((s) => s.key === DocumentStatus.COMPLETED)?.count, 3);
+});
+
+test('aggregateDirectionDistribution calculates counts and percentages for selected year and all years', () => {
+  const dist2026 = aggregateDirectionDistribution(records, '2026');
+  assert.equal(dist2026.total, 6);
+  assert.equal(dist2026.items.length, 4);
+  assert.equal(dist2026.items[0].direction, DocumentDirection.INCOMING);
+  assert.equal(dist2026.items[0].count, 2);
+  assert.equal(dist2026.items[0].percentage, 33.3);
+  assert.equal(dist2026.items[2].direction, DocumentDirection.LEGAL);
+  assert.equal(dist2026.items[2].count, 1);
+  assert.equal(dist2026.items[2].percentage, 16.7);
+
+  const distAll = aggregateDirectionDistribution(records, 'all');
+  assert.equal(distAll.total, 7);
+  assert.equal(distAll.items[0].count, 3);
+  assert.equal(distAll.items[0].percentage, 42.9);
+
+  const distEmpty = aggregateDirectionDistribution([], 'all');
+  assert.equal(distEmpty.total, 0);
+  assert.ok(distEmpty.items.every((item) => item.count === 0 && item.percentage === 0));
 });
