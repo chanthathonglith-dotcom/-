@@ -149,6 +149,11 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                         {doc.docNumber}
                       </span>
                     </div>
+                    {doc.outgoingDocNumber && (
+                      <div className="mt-0.5 text-[11px] font-mono-tabular text-teal-700 dark:text-teal-400">
+                        ຂາອອກ: {doc.outgoingDocNumber}
+                      </div>
+                    )}
                     <div className="flex items-center gap-1.5 mt-1 text-xs text-slate-500 dark:text-slate-400">
                       <span className={`font-semibold ${CHANNEL_VISUALS[doc.direction].accentTextClass}`}>
                         {DIRECTION_LABELS[doc.direction]}
@@ -301,6 +306,11 @@ export const DocumentList: React.FC<DocumentListProps> = ({
                 <span className="font-mono-tabular font-semibold text-slate-800 dark:text-slate-200 truncate">
                   {doc.docNumber}
                 </span>
+                {doc.outgoingDocNumber && (
+                  <span className="font-mono-tabular text-teal-700 dark:text-teal-400 truncate">
+                    (ຂາອອກ: {doc.outgoingDocNumber})
+                  </span>
+                )}
                 {doc.direction !== DocumentDirection.INCOMING &&
                   doc.direction !== DocumentDirection.OUTGOING && (
                     <>

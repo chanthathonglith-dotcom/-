@@ -10,6 +10,10 @@ import {
 } from './src/server/pushStore.ts';
 import { RealtimeHub } from './src/server/realtimeHub.ts';
 import type { DocumentRecord } from './src/types/document.ts';
+import {
+  documentsToExcelBuffer,
+  excelBufferToDocuments,
+} from './src/utils/excelStorageLogic.ts';
 
 const PORT = Number(process.env.PORT || 3000);
 const isProduction = process.env.NODE_ENV === 'production';
@@ -253,6 +257,128 @@ async function startServer() {
     }
 
     res.status(400).json({ error: 'Unsupported realtime event payload' });
+  });
+
+  // Local Disk / Drive D: & Excel (.xlsx) backup endpoints
+  const localStorageDir = path.resolve(process.cwd(), 'local_drive_data');
+  const localScansDir = path.join(localStorageDir, 'Scans');
+  const localExcelPath = path.join(localStorageDir, 'documents.xlsx');
+
+  const ensureLocalDirs = () => {
+    fs.mkdirSync(localStorageDir, { recursive: true });
+    fs.mkdirSync(localScansDir, { recursive: true });
+  };
+
+  app.get('/api/local-storage/status', (_req, res) => {
+    ensureLocalDirs();
+    const excelExists = fs.existsSync(localExcelPath);
+    const stat = excelExists ? fs.statSync(localExcelPath) : null;
+    const scanFiles = fs.existsSync(localScansDir)
+      ? fs.readdirSync(localScansDir)
+      : [];
+    res.json({
+      serverStorageDir: localStorageDir,
+      scansDir: localScansDir,
+      excelFilePath: localExcelPath,
+      excelExists,
+      scanCount: scanFiles.length,
+      lastUpdatedAt: stat ? stat.mtime.toISOString() : null,
+    });
+  });
+
+  app.get('/api/local-storage/documents', (_req, res) => {
+    ensureLocalDirs();
+    if (!fs.existsSync(localExcelPath)) {
+      res.json({ ok: true, documents: [] });
+      return;
+    }
+    try {
+      const buf = fs.readFileSync(localExcelPath);
+      const documents = excelBufferToDocuments(new Uint8Array(buf));
+      res.json({ ok: true, documents });
+    } catch {
+      res.status(500).json({ error: 'Failed to read local Excel workbook' });
+    }
+  });
+
+  app.post(
+    '/api/local-storage/sync-excel',
+    express.json({ limit: '15mb' }),
+    (req, res) => {
+      const body = req.body as { documents?: DocumentRecord[] };
+      if (!Array.isArray(body?.documents)) {
+        res.status(400).json({ error: 'Expected documents array' });
+        return;
+      }
+      ensureLocalDirs();
+      const buffer = documentsToExcelBuffer(body.documents);
+      fs.writeFileSync(localExcelPath, Buffer.from(buffer));
+      res.json({
+        ok: true,
+        filePath: localExcelPath,
+        byteLength: buffer.byteLength,
+        syncedAt: new Date().toISOString(),
+      });
+    }
+  );
+
+  app.post(
+    '/api/local-storage/import-excel',
+    express.json({ limit: '25mb' }),
+    (req, res) => {
+      const body = req.body as { dataBase64?: string };
+      if (!body?.dataBase64 || typeof body.dataBase64 !== 'string') {
+        res.status(400).json({ error: 'Missing Excel file payload' });
+        return;
+      }
+      try {
+        const raw = Buffer.from(body.dataBase64, 'base64');
+        const documents = excelBufferToDocuments(new Uint8Array(raw));
+        res.json({ ok: true, documents });
+      } catch {
+        res.status(400).json({ error: 'Invalid Excel (.xlsx) workbook' });
+      }
+    }
+  );
+
+  app.post(
+    '/api/local-storage/upload-scan',
+    express.json({ limit: '35mb' }),
+    (req, res) => {
+      const body = req.body as {
+        fileName?: string;
+        mimeType?: string;
+        dataBase64?: string;
+      };
+      if (!body?.fileName || !body?.dataBase64) {
+        res.status(400).json({ error: 'Missing fileName or dataBase64' });
+        return;
+      }
+      ensureLocalDirs();
+      const baseName = path
+        .basename(body.fileName)
+        .replace(/[^a-zA-Z0-9._-]/g, '_');
+      const safeName = `${Date.now()}_${baseName || 'scan.jpg'}`;
+      const targetPath = path.join(localScansDir, safeName);
+      const buffer = Buffer.from(body.dataBase64, 'base64');
+      fs.writeFileSync(targetPath, buffer);
+      res.json({
+        ok: true,
+        id: `local-${safeName}`,
+        name: safeName,
+        webViewLink: `/api/local-storage/files/${encodeURIComponent(safeName)}`,
+      });
+    }
+  );
+
+  app.get('/api/local-storage/files/:filename', (req, res) => {
+    const safeName = path.basename(req.params.filename || '');
+    const targetPath = path.join(localScansDir, safeName);
+    if (!safeName || !fs.existsSync(targetPath)) {
+      res.status(404).json({ error: 'Local scan file not found' });
+      return;
+    }
+    res.sendFile(targetPath);
   });
 
   if (!isProduction) {

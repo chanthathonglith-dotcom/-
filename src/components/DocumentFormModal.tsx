@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ExternalLink, FileUp, Paperclip, Trash2, X } from 'lucide-react';
+import { Camera, ExternalLink, FileUp, Paperclip, Trash2, X } from 'lucide-react';
 import {
   DIRECTION_LABELS,
   DocumentDirection,
@@ -9,6 +9,7 @@ import {
   DocumentStatus,
   PURPOSE_LABELS,
   STATUS_LABELS,
+  StorageProviderMode,
   ValidationErrors,
 } from '../types/document';
 import {
@@ -20,6 +21,7 @@ import {
 } from '../utils/documentLogic';
 import { CreateToastInput } from '../utils/toastLogic';
 import { ChannelEmblem } from './AppLogo';
+import { CameraScanModal } from './CameraScanModal';
 import { SignaturePad } from './SignaturePad';
 
 interface DocumentFormModalProps {
@@ -28,6 +30,7 @@ interface DocumentFormModalProps {
   initialRecord: DocumentRecord | null;
   defaultDirection?: DocumentDirection;
   isDemoMode: boolean;
+  storageMode?: StorageProviderMode;
   isSubmitting: boolean;
   onUploadFileToDrive: (file: File) => Promise<{
     id: string;
@@ -53,6 +56,7 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
   initialRecord,
   defaultDirection = DocumentDirection.INCOMING,
   isDemoMode,
+  storageMode = 'google',
   isSubmitting,
   onUploadFileToDrive,
   onNotifyToast,
@@ -63,6 +67,7 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
 
   const [direction, setDirection] = useState<DocumentDirection>(defaultDirection);
   const [docNumber, setDocNumber] = useState('');
+  const [outgoingDocNumber, setOutgoingDocNumber] = useState('');
   const [docDate, setDocDate] = useState(getTodayIso());
   const [incomingDate, setIncomingDate] = useState(getTodayIso());
   const [outgoingDate, setOutgoingDate] = useState('');
@@ -82,12 +87,14 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     if (mode === 'edit' && initialRecord) {
       setDirection(initialRecord.direction);
       setDocNumber(initialRecord.docNumber);
+      setOutgoingDocNumber(initialRecord.outgoingDocNumber || '');
       setDocDate(initialRecord.docDate);
       setIncomingDate(getEffectiveIncomingDate(initialRecord));
       setOutgoingDate(getEffectiveOutgoingDate(initialRecord));
@@ -107,6 +114,7 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
       const today = getTodayIso();
       setDirection(defaultDirection);
       setDocNumber('');
+      setOutgoingDocNumber('');
       setDocDate(today);
       setIncomingDate(today);
       setOutgoingDate('');
@@ -125,6 +133,7 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
     }
     setErrors({});
     setUploadError(null);
+    setCameraOpen(false);
   }, [open, mode, initialRecord, defaultDirection]);
 
   useEffect(() => {
@@ -140,9 +149,7 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
 
   if (!open) return null;
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const processScanFile = async (file: File) => {
     setUploadError(null);
 
     if (file.size > 25 * 1024 * 1024) {
@@ -156,7 +163,7 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
       return;
     }
 
-    if (isDemoMode) {
+    if (isDemoMode && storageMode === 'google') {
       const localUrl = URL.createObjectURL(file);
       setScanLink(localUrl);
       setScanFileName(file.name);
@@ -175,7 +182,10 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
       id: 'drive-upload',
       variant: 'loading',
       title: 'ກຳລັງອັບໂຫຼດ...',
-      description: `ກຳລັງອັບໂຫຼດ "${file.name}" ຂຶ້ນ Google Drive`,
+      description:
+        storageMode === 'local_drive'
+          ? `ກຳລັງບັນທຶກ "${file.name}" ລົງ Drive D: / ເຄື່ອງ`
+          : `ກຳລັງອັບໂຫຼດ "${file.name}"`,
     });
     try {
       const uploaded = await onUploadFileToDrive(file);
@@ -205,6 +215,12 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
         fileInputRef.current.value = '';
       }
     }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await processScanFile(file);
   };
 
   const handleDirectionChange = (nextDir: DocumentDirection) => {
@@ -240,6 +256,7 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
     const input: DocumentInput = {
       direction,
       docNumber: docNumber.trim(),
+      outgoingDocNumber: outgoingDocNumber.trim(),
       docDate: resolvedPrimaryDate,
       incomingDate: incomingDate.trim(),
       outgoingDate: outgoingDate.trim(),
@@ -314,16 +331,20 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
             </div>
           </div>
 
-          {/* Doc Number & Due Date */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Doc Number, Outgoing Doc Number & Due Date */}
+          <div
+            className={`grid grid-cols-1 gap-4 ${
+              direction === DocumentDirection.INCOMING || direction === DocumentDirection.OUTGOING
+                ? 'sm:grid-cols-3'
+                : 'sm:grid-cols-2'
+            }`}
+          >
             <div>
               <label htmlFor="doc-number-input" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                 {direction === DocumentDirection.LEGAL
                   ? 'ເລກທີນິຕິກຳ'
                   : direction === DocumentDirection.SPEECH
                   ? 'ເລກທີບົດໂອ້ລົມ'
-                  : direction === DocumentDirection.OUTGOING
-                  ? 'ເລກທີເອກະສານຂາອອກ'
                   : 'ເລກທີເອກະສານຂາເຂົ້າ'}{' '}
                 <span className="text-red-600 dark:text-red-400">*</span>
               </label>
@@ -340,8 +361,6 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
                     ? 'ຕົວຢ່າງ: 015/ນກ-2026'
                     : direction === DocumentDirection.SPEECH
                     ? 'ຕົວຢ່າງ: 009/ບອ-2026'
-                    : direction === DocumentDirection.OUTGOING
-                    ? 'ຕົວຢ່າງ: 119/ຂອ-2026'
                     : 'ຕົວຢ່າງ: 043/ຂຂ-2026'
                 }
                 className={`w-full px-3.5 py-2.5 min-h-[42px] text-sm font-mono-tabular bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-700 dark:focus:border-blue-500 ${
@@ -354,6 +373,29 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
                 </p>
               )}
             </div>
+
+            {(direction === DocumentDirection.INCOMING ||
+              direction === DocumentDirection.OUTGOING) && (
+              <div>
+                <label
+                  htmlFor="doc-outgoing-number-input"
+                  className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5"
+                >
+                  ເລກທີເອກະສານຂາອອກ{' '}
+                  <span className="text-xs font-normal text-slate-400 dark:text-slate-500">
+                    (ບໍ່ບັງຄັບ)
+                  </span>
+                </label>
+                <input
+                  id="doc-outgoing-number-input"
+                  type="text"
+                  value={outgoingDocNumber}
+                  onChange={(e) => setOutgoingDocNumber(e.target.value)}
+                  placeholder="ຕົວຢ່າງ: 119/ຂອ-2026"
+                  className="w-full px-3.5 py-2.5 min-h-[42px] text-sm font-mono-tabular bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-700 dark:focus:border-blue-500"
+                />
+              </div>
+            )}
 
             <div>
               <label htmlFor="doc-due-date-input" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
@@ -593,13 +635,13 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
             errorMessage={errors.signatureDataUrl}
           />
 
-          {/* Scanned File Upload & Link */}
+          {/* Scanned File Upload, Camera Capture & Link */}
           <div className="pt-2 border-t border-slate-200 dark:border-slate-800 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <label htmlFor="doc-scan-link-input" className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                ຟາຍສະແກນເອກະສານ (Google Drive)
+                ຟາຍສະແກນເອກະສານ ({storageMode === 'local_drive' ? 'Drive D: / ເຄື່ອງ' : storageMode === 'both' ? 'Drive & Drive D:' : 'Google Drive'})
               </label>
-              <div>
+              <div className="flex flex-wrap items-center gap-2">
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -610,6 +652,16 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
                 />
                 <button
                   type="button"
+                  onClick={() => setCameraOpen(true)}
+                  disabled={isUploading || isSubmitting}
+                  data-testid="open-camera-scan-btn"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-semibold text-teal-800 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/60 hover:bg-teal-100 dark:hover:bg-teal-900/60 rounded-lg transition-colors whitespace-nowrap"
+                >
+                  <Camera className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span>ຖ່າຍຮູບຈາກກ້ອງ</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={isUploading || isSubmitting}
                   className="inline-flex items-center gap-2 px-3.5 py-2 min-h-[38px] text-xs font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/60 rounded-lg transition-colors whitespace-nowrap"
@@ -617,10 +669,12 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
                   <FileUp className="w-4 h-4 shrink-0" aria-hidden="true" />
                   <span>
                     {isUploading
-                      ? 'ກຳລັງອັບໂຫຼດຂຶ້ນ Drive...'
+                      ? 'ກຳລັງອັບໂຫຼດ...'
+                      : storageMode === 'local_drive'
+                      ? 'ອັບໂຫຼດຟາຍລົງ Drive D:'
                       : isDemoMode
                       ? 'ແນບຟາຍສະແກນ (ຕົວຢ່າງ)'
-                      : 'ອັບໂຫຼດຟາຍສະແກນຂຶ້ນ Drive'}
+                      : 'ອັບໂຫຼດຟາຍສະແກນ'}
                   </span>
                 </button>
               </div>
@@ -711,6 +765,14 @@ export const DocumentFormModal: React.FC<DocumentFormModalProps> = ({
           </div>
         </form>
       </div>
+
+      <CameraScanModal
+        open={cameraOpen}
+        onCaptureFile={(file) => {
+          void processScanFile(file);
+        }}
+        onClose={() => setCameraOpen(false)}
+      />
     </div>
   );
 };

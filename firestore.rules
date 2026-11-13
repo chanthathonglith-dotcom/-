@@ -1,0 +1,190 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn()
+        && request.auth.token.email is string
+        && request.auth.token.email_verified == true;
+    }
+
+    // Sole Admin strictly enforced by verified canonical email
+    function isAdmin() {
+      return isVerifiedUser()
+        && request.auth.token.email.lower() == 'chanthathonglith@gmail.com';
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string
+        && id.size() >= 1
+        && id.size() <= 128
+        && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isApprovedMember() {
+      return isVerifiedUser()
+        && exists(/databases/$(database)/documents/accessRequests/$(request.auth.uid))
+        && get(/databases/$(database)/documents/accessRequests/$(request.auth.uid)).data.status == 'approved';
+    }
+
+    function isValidAccessRequest(data) {
+      return data.keys().hasAll([
+          'uid',
+          'email',
+          'displayName',
+          'photoURL',
+          'reason',
+          'status',
+          'reviewedByEmail',
+          'adminNote',
+          'requestedAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid',
+          'email',
+          'displayName',
+          'photoURL',
+          'reason',
+          'status',
+          'reviewedByEmail',
+          'adminNote',
+          'requestedAt',
+          'updatedAt'
+        ])
+        && data.uid is string
+        && data.uid.size() >= 1
+        && data.uid.size() <= 128
+        && data.uid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.email is string
+        && data.email.size() >= 3
+        && data.email.size() <= 254
+        && data.displayName is string
+        && data.displayName.size() <= 120
+        && data.photoURL is string
+        && data.photoURL.size() <= 500
+        && data.reason is string
+        && data.reason.size() <= 300
+        && data.status in ['pending', 'approved', 'rejected']
+        && data.reviewedByEmail is string
+        && data.reviewedByEmail.size() <= 254
+        && data.adminNote is string
+        && data.adminNote.size() <= 300
+        && data.requestedAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidWorkspaceConfig(data) {
+      return data.keys().hasAll([
+          'spreadsheetId',
+          'spreadsheetTitle',
+          'updatedByEmail',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'spreadsheetId',
+          'spreadsheetTitle',
+          'updatedByEmail',
+          'updatedAt'
+        ])
+        && data.spreadsheetId is string
+        && data.spreadsheetId.size() <= 200
+        && data.spreadsheetTitle is string
+        && data.spreadsheetTitle.size() <= 200
+        && data.updatedByEmail is string
+        && data.updatedByEmail.size() >= 3
+        && data.updatedByEmail.size() <= 254
+        && data.updatedAt is timestamp;
+    }
+
+    match /accessRequests/{userId} {
+      allow get: if isValidId(userId) && (isAdmin() || (isVerifiedUser() && isOwner(userId)));
+      allow list: if isAdmin();
+
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidAccessRequest(incoming())
+        && incoming().uid == request.auth.uid
+        && incoming().email == request.auth.token.email
+        && incoming().status == 'pending'
+        && incoming().reviewedByEmail == ''
+        && incoming().adminNote == ''
+        && incoming().requestedAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isVerifiedUser()
+        && isValidId(userId)
+        && isValidAccessRequest(incoming())
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().requestedAt == existing().requestedAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            isAdmin()
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status',
+              'reviewedByEmail',
+              'adminNote',
+              'updatedAt'
+            ])
+            && incoming().reviewedByEmail == request.auth.token.email
+          )
+          ||
+          (
+            isOwner(userId)
+            && existing().status != 'approved'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName',
+              'photoURL',
+              'reason',
+              'status',
+              'reviewedByEmail',
+              'adminNote',
+              'updatedAt'
+            ])
+            && incoming().status == 'pending'
+            && incoming().reviewedByEmail == ''
+            && incoming().adminNote == ''
+          )
+        );
+
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    match /workspaceConfig/{configId} {
+      allow get: if isValidId(configId) && (isAdmin() || isApprovedMember());
+      allow list: if false;
+
+      allow create, update: if isAdmin()
+        && isValidId(configId)
+        && isValidWorkspaceConfig(incoming())
+        && incoming().updatedByEmail == request.auth.token.email
+        && incoming().updatedAt == request.time;
+
+      allow delete: if false;
+    }
+  }
+}

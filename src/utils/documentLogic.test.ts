@@ -375,3 +375,24 @@ test('exportDocumentsToCsv includes UTF-8 BOM and escapes commas', () => {
   assert.ok(csv.startsWith('\uFEFF'));
   assert.ok(csv.includes('"ຫົວຂໍ້, ມີຈຸດ"'));
 });
+
+test('outgoingDocNumber round-trips in 21-column serialization and is searchable', () => {
+  assert.equal(SHEET_HEADERS.length, 21);
+  const docWithOutgoingNo: DocumentRecord = {
+    ...sampleDocs[0],
+    outgoingDocNumber: '888/ຂອ-2026',
+  };
+  const row = documentToSheetRow(docWithOutgoingNo);
+  assert.equal(row.length, 21);
+  assert.equal(row[20], '888/ຂອ-2026');
+
+  const parsed = sheetRowsToDocuments([[...SHEET_HEADERS], row]);
+  assert.equal(parsed[0].outgoingDocNumber, '888/ຂອ-2026');
+
+  const filtered = filterDocuments([docWithOutgoingNo, sampleDocs[1]], {
+    ...DEFAULT_FILTERS,
+    query: '888/ຂອ',
+  });
+  assert.equal(filtered.length, 1);
+  assert.equal(filtered[0].id, 'DOC-1');
+});

@@ -164,7 +164,7 @@ async function ensureHeadersOnSheet(
   sheetTitle: string,
   sheetId: number
 ): Promise<void> {
-  const range = `'${sheetTitle.replace(/'/g, "''")}'!A1:T1`;
+  const range = `'${sheetTitle.replace(/'/g, "''")}'!A1:U1`;
   const checkRes = await googleFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
       spreadsheetId
@@ -326,7 +326,7 @@ export async function fetchDocumentsFromSheet(
   token: string,
   conn: WorkspaceConnection
 ): Promise<DocumentRecord[]> {
-  const range = `'${conn.sheetTitle.replace(/'/g, "''")}'!A1:T`;
+  const range = `'${conn.sheetTitle.replace(/'/g, "''")}'!A1:U`;
   const res = await googleFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
       conn.spreadsheetId
@@ -342,7 +342,7 @@ export async function appendDocumentToSheet(
   conn: WorkspaceConnection,
   doc: DocumentRecord
 ): Promise<void> {
-  const range = `'${conn.sheetTitle.replace(/'/g, "''")}'!A:T`;
+  const range = `'${conn.sheetTitle.replace(/'/g, "''")}'!A:U`;
   await googleFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
       conn.spreadsheetId
@@ -384,7 +384,7 @@ export async function updateDocumentInSheet(
   doc: DocumentRecord
 ): Promise<void> {
   const rowNumber = await findRowNumberById(token, conn, doc.id);
-  const range = `'${conn.sheetTitle.replace(/'/g, "''")}'!A${rowNumber}:T${rowNumber}`;
+  const range = `'${conn.sheetTitle.replace(/'/g, "''")}'!A${rowNumber}:U${rowNumber}`;
   await googleFetch(
     `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
       conn.spreadsheetId

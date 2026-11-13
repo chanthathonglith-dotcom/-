@@ -29,7 +29,8 @@ export enum SortOrder {
 export interface DocumentRecord {
   id: string;
   direction: DocumentDirection;
-  docNumber: string; // ເລກທີເອກະສານ
+  docNumber: string; // ເລກທີເອກະສານ (ຫຼື ເລກທີເອກະສານຂາເຂົ້າ)
+  outgoingDocNumber?: string; // ເລກທີເອກະສານຂາອອກ
   docDate: string; // YYYY-MM-DD ວັນທີເອກະສານຫຼັກ
   incomingDate?: string; // YYYY-MM-DD ວັນທີ, ເດືອນ, ປີ ເອກະສານຂາເຂົ້າ
   outgoingDate?: string; // YYYY-MM-DD ວັນທີ, ເດືອນ, ປີ ເອກະສານຂາອອກ
@@ -75,6 +76,7 @@ export interface DocumentStats {
 
 export interface ValidationErrors {
   docNumber?: string;
+  outgoingDocNumber?: string;
   docDate?: string;
   incomingDate?: string;
   outgoingDate?: string;
@@ -83,6 +85,40 @@ export interface ValidationErrors {
   department?: string;
   scanLink?: string;
   signatureDataUrl?: string;
+}
+
+export type StorageProviderMode = 'google' | 'local_drive' | 'both';
+
+export interface LocalDriveConfig {
+  mode: StorageProviderMode;
+  driveLetterPath: string; // e.g. D:\DocManager
+  excelFilePath: string; // e.g. D:\DocManager\documents.xlsx
+  scansFolderPath: string; // e.g. D:\DocManager\Scans
+  linkedFolderName: string;
+  linkedExcelFileName: string;
+  lastLocalSyncAt: string;
+}
+
+export type AccessApprovalStatus = 'pending' | 'approved' | 'rejected';
+
+export interface AccessRequestRecord {
+  uid: string;
+  email: string;
+  displayName: string;
+  photoURL: string;
+  reason: string;
+  status: AccessApprovalStatus;
+  reviewedByEmail: string;
+  adminNote: string;
+  requestedAt: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceSharedConfig {
+  spreadsheetId: string;
+  spreadsheetTitle: string;
+  updatedByEmail: string;
+  updatedAt: string;
 }
 
 export enum NotificationTriggerType {

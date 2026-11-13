@@ -2,7 +2,9 @@ import React from 'react';
 import {
   BarChart3,
   LogOut,
+  QrCode,
   Settings,
+  ShieldCheck,
   X,
 } from 'lucide-react';
 import { DocumentDirection, DocumentStats } from '../types/document';
@@ -22,10 +24,14 @@ interface SidebarProps {
   onSelectSection: (section: NavSection) => void;
   stats: DocumentStats;
   isDemoMode: boolean;
+  isSoleAdmin?: boolean;
+  pendingApprovalsCount?: number;
   userEmail: string | null;
   userDisplayName: string | null;
   userPhotoUrl: string | null;
   onOpenSettings: () => void;
+  onOpenQrScanner?: () => void;
+  onOpenAdminApprovals?: () => void;
   onLogout: () => void;
   onRequestGoogleLogin: () => void;
   mobileOpen: boolean;
@@ -37,10 +43,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSelectSection,
   stats,
   isDemoMode,
+  isSoleAdmin = false,
+  pendingApprovalsCount = 0,
   userEmail,
   userDisplayName,
   userPhotoUrl,
   onOpenSettings,
+  onOpenQrScanner,
+  onOpenAdminApprovals,
   onLogout,
   onRequestGoogleLogin,
   mobileOpen,
@@ -158,7 +168,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
           );
         })}
 
-        <div className="pt-4 mt-4 border-t border-slate-200 dark:border-slate-800">
+        <div className="pt-4 mt-4 border-t border-slate-200 dark:border-slate-800 space-y-1">
+          {onOpenQrScanner && (
+            <button
+              type="button"
+              onClick={() => {
+                onOpenQrScanner();
+                onCloseMobile();
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 min-h-[42px] rounded-lg text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors"
+            >
+              <QrCode className="w-4 h-4 shrink-0 text-blue-700 dark:text-blue-400" aria-hidden="true" />
+              <span className="truncate">ສະແກນ QR ເອກະສານ</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => {
@@ -168,8 +192,30 @@ export const Sidebar: React.FC<SidebarProps> = ({
             className="w-full flex items-center gap-2.5 px-3 py-2.5 min-h-[42px] rounded-lg text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white transition-colors"
           >
             <Settings className="w-4 h-4 shrink-0" aria-hidden="true" />
-            <span className="truncate">ຕັ້ງຄ່າ Sheets &amp; Drive</span>
+            <span className="truncate">ຕັ້ງຄ່າ Sheets, Excel &amp; Drive D:</span>
           </button>
+
+          {isSoleAdmin && onOpenAdminApprovals && (
+            <button
+              type="button"
+              onClick={() => {
+                onOpenAdminApprovals();
+                onCloseMobile();
+              }}
+              data-testid="sidebar-admin-approvals-btn"
+              className="w-full flex items-center justify-between px-3 py-2.5 min-h-[42px] rounded-lg text-sm font-medium text-blue-800 dark:text-blue-300 bg-blue-50/70 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-900/60 transition-colors"
+            >
+              <span className="flex items-center gap-2.5 truncate">
+                <ShieldCheck className="w-4 h-4 shrink-0" aria-hidden="true" />
+                <span className="truncate">ອະນຸມັດຜູ້ໃຊ້ (Admin)</span>
+              </span>
+              {pendingApprovalsCount > 0 && (
+                <span className="text-xs font-mono-tabular font-bold text-amber-700 dark:text-amber-300 pl-2">
+                  {pendingApprovalsCount}
+                </span>
+              )}
+            </button>
+          )}
         </div>
       </nav>
 

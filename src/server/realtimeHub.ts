@@ -418,7 +418,7 @@ export class RealtimeHub {
         return false;
       }
 
-      const range = `'${watcher.sheetTitle.replace(/'/g, "''")}'!A1:T`;
+      const range = `'${watcher.sheetTitle.replace(/'/g, "''")}'!A1:U`;
       const valuesUrl = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
         watcher.spreadsheetId
       )}/values/${encodeURIComponent(range)}`;

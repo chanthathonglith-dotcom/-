@@ -1,6 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { User } from 'firebase/auth';
-import { Bell, ExternalLink, FilePlus2, Menu, RefreshCw } from 'lucide-react';
+import {
+  Bell,
+  ExternalLink,
+  FilePlus2,
+  Menu,
+  QrCode,
+  RefreshCw,
+  ShieldCheck,
+} from 'lucide-react';
+import { AccessApprovalScreen } from './components/AccessApprovalScreen';
+import { AdminApprovalsModal } from './components/AdminApprovalsModal';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { ChannelEmblem } from './components/AppLogo';
 import { DocumentAnalyticsView } from './components/DocumentAnalyticsView';
@@ -11,12 +21,30 @@ import { LoginScreen } from './components/LoginScreen';
 import { NotificationModal } from './components/NotificationModal';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { PWAInstallButton } from './components/PWAInstallButton';
+import { QrScannerModal } from './components/QrScannerModal';
 import { SearchFilterBar } from './components/SearchFilterBar';
 import { NavSection, Sidebar } from './components/Sidebar';
 import { ThemeToggleButton } from './components/ThemeToggleButton';
 import { ToastViewport } from './components/ToastViewport';
 import { WorkspaceSettingsModal } from './components/WorkspaceSettingsModal';
 import { DEMO_DOCUMENTS } from './data/demoDocuments';
+import {
+  fetchSharedWorkspaceConfig,
+  removeAccessRequest,
+  reviewAccessRequest,
+  saveSharedWorkspaceConfig,
+  submitOrUpdateAccessRequest,
+  subscribeAllAccessRequests,
+  subscribeOwnAccessRequest,
+} from './services/accessService';
+import { testFirestoreConnection } from './services/firebaseClient';
+import {
+  loadLocalDriveConfig,
+  saveLocalDriveConfig,
+  saveScanFileToLocalDriveAndServer,
+  syncDocumentsToLocalDriveAndServer,
+  triggerExcelDownload,
+} from './services/localDriveStorage';
 import {
   BrowserPermissionState,
   getDesktopPushState,
@@ -53,6 +81,7 @@ import {
   uploadScanFileToDrive,
 } from './services/googleWorkspace';
 import {
+  AccessRequestRecord,
   AppNotificationItem,
   DEFAULT_FILTERS,
   DesktopPushState,
@@ -61,10 +90,17 @@ import {
   DocumentInput,
   DocumentRecord,
   DocumentStatus,
+  LocalDriveConfig,
   NotificationSettings,
   NotificationTriggerType,
   WorkspaceConnection,
+  WorkspaceSharedConfig,
 } from './types/document';
+import {
+  countPendingRequests,
+  isSoleAdminEmail,
+  resolveUserAccessGate,
+} from './utils/accessControlLogic';
 import {
   computeDocumentStats,
   exportDocumentsToCsv,
@@ -135,6 +171,20 @@ export default function App() {
   const [editingRecord, setEditingRecord] = useState<DocumentRecord | null>(null);
   const [viewingRecord, setViewingRecord] = useState<DocumentRecord | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [qrScannerOpen, setQrScannerOpen] = useState(false);
+  const [adminApprovalsOpen, setAdminApprovalsOpen] = useState(false);
+
+  const [localDriveConfig, setLocalDriveConfig] = useState<LocalDriveConfig>(() =>
+    loadLocalDriveConfig()
+  );
+
+  const [ownAccessRequest, setOwnAccessRequest] = useState<AccessRequestRecord | null>(null);
+  const [accessChecking, setAccessChecking] = useState(false);
+  const [isSubmittingAccessRequest, setIsSubmittingAccessRequest] = useState(false);
+  const [adminRequests, setAdminRequests] = useState<AccessRequestRecord[]>([]);
+  const [sharedWorkspaceConfig, setSharedWorkspaceConfig] =
+    useState<WorkspaceSharedConfig | null>(null);
+  const workspaceLoadedForUidRef = useRef<string | null>(null);
 
   const [pendingMutation, setPendingMutation] = useState<PendingMutation>(null);
   const [isMutating, setIsMutating] = useState(false);
@@ -354,6 +404,7 @@ export default function App() {
   );
 
   useEffect(() => {
+    void testFirestoreConnection();
     void (async () => {
       await registerNotificationServiceWorker();
       setPermissionState(getNotificationPermissionState());
@@ -428,23 +479,112 @@ export default function App() {
     notificationSettings.enabled,
   ]);
 
+  const isSoleAdmin = useMemo(
+    () => Boolean(!isDemoMode && user && isSoleAdminEmail(user.email, user.emailVerified)),
+    [isDemoMode, user]
+  );
+
+  const userAccessGate = useMemo(() => {
+    if (!user) return 'unverified' as const;
+    return resolveUserAccessGate({
+      email: user.email,
+      emailVerified: user.emailVerified,
+      request: ownAccessRequest,
+    });
+  }, [user, ownAccessRequest]);
+
+  const isAccessGranted = isDemoMode || isSoleAdmin || userAccessGate === 'approved';
+  const pendingApprovalsCount = useMemo(
+    () => countPendingRequests(adminRequests),
+    [adminRequests]
+  );
+
   useEffect(() => {
     const unsubscribe = initAuth(
-      (authedUser, token) => {
+      (authedUser) => {
         setUser(authedUser);
         setIsDemoMode(false);
         setNeedsAuth(false);
-        void loadWorkspaceData(token, authedUser.uid);
       },
       (signedInUserWithoutToken) => {
         setUser(signedInUserWithoutToken);
+        workspaceLoadedForUidRef.current = null;
         if (!shouldAutoStartDemo()) {
           setNeedsAuth(true);
         }
       }
     );
     return () => unsubscribe();
-  }, [loadWorkspaceData]);
+  }, []);
+
+  // Firestore real-time access listener & workspace bootstrap once approved
+  useEffect(() => {
+    if (isDemoMode || needsAuth || !user) {
+      setOwnAccessRequest(null);
+      setAdminRequests([]);
+      setAccessChecking(false);
+      return;
+    }
+
+    if (isSoleAdmin) {
+      setAccessChecking(false);
+      const unsubAll = subscribeAllAccessRequests(
+        (items) => setAdminRequests(items),
+        () => {}
+      );
+      void fetchSharedWorkspaceConfig()
+        .then((cfg) => setSharedWorkspaceConfig(cfg))
+        .catch(() => {});
+
+      const token = getAccessToken();
+      if (token && workspaceLoadedForUidRef.current !== user.uid) {
+        workspaceLoadedForUidRef.current = user.uid;
+        void loadWorkspaceData(token, user.uid);
+      }
+      return () => unsubAll();
+    }
+
+    setAccessChecking(true);
+    const unsubOwn = subscribeOwnAccessRequest(
+      user.uid,
+      (req) => {
+        setOwnAccessRequest(req);
+        setAccessChecking(false);
+      },
+      () => {
+        setAccessChecking(false);
+      }
+    );
+    return () => unsubOwn();
+  }, [isDemoMode, isSoleAdmin, loadWorkspaceData, needsAuth, user]);
+
+  // Auto-load workspace as soon as a non-admin account gets approved
+  useEffect(() => {
+    if (isDemoMode || needsAuth || !user || isSoleAdmin) return;
+    if (userAccessGate !== 'approved') {
+      workspaceLoadedForUidRef.current = null;
+      return;
+    }
+    if (workspaceLoadedForUidRef.current === user.uid) return;
+
+    const token = getAccessToken();
+    if (!token) return;
+    workspaceLoadedForUidRef.current = user.uid;
+
+    void (async () => {
+      let preferredSheetId: string | undefined;
+      try {
+        const sharedCfg = await fetchSharedWorkspaceConfig();
+        setSharedWorkspaceConfig(sharedCfg);
+        if (sharedCfg?.spreadsheetId) {
+          preferredSheetId = sharedCfg.spreadsheetId;
+        }
+      } catch {
+        // ignore if shared config has not been published yet
+      }
+      await loadWorkspaceData(token, user.uid, preferredSheetId);
+    })();
+  }, [isDemoMode, isSoleAdmin, loadWorkspaceData, needsAuth, user, userAccessGate]);
 
   // Check due documents whenever document list updates or every 60s
   useEffect(() => {
@@ -605,10 +745,10 @@ export default function App() {
     setBannerError(null);
     try {
       const result = await googleSignIn();
+      workspaceLoadedForUidRef.current = null;
       setUser(result.user);
       setIsDemoMode(false);
       setNeedsAuth(false);
-      await loadWorkspaceData(result.accessToken, result.user.uid);
     } catch (err) {
       const msg =
         err instanceof Error
@@ -635,6 +775,9 @@ export default function App() {
 
   const handleLogout = async () => {
     await logout();
+    workspaceLoadedForUidRef.current = null;
+    setOwnAccessRequest(null);
+    setAdminRequests([]);
     setConnection(null);
     setDocuments([]);
     setIsDemoMode(false);
@@ -725,7 +868,51 @@ export default function App() {
     Boolean(filters.dateFrom) ||
     Boolean(filters.dateTo);
 
+  const syncLocalDriveIfEnabled = useCallback(
+    async (nextDocs: DocumentRecord[]) => {
+      if (localDriveConfig.mode === 'google') return;
+      const syncResult = await syncDocumentsToLocalDriveAndServer(
+        nextDocs,
+        localDriveConfig
+      );
+      const nextCfg: LocalDriveConfig = {
+        ...localDriveConfig,
+        lastLocalSyncAt: syncResult.syncedAt,
+      };
+      setLocalDriveConfig(nextCfg);
+      saveLocalDriveConfig(nextCfg);
+    },
+    [localDriveConfig]
+  );
+
   const handleUploadFileToDrive = async (file: File) => {
+    if (localDriveConfig.mode === 'local_drive') {
+      const saved = await saveScanFileToLocalDriveAndServer(file);
+      return {
+        id: saved.id,
+        name: saved.name,
+        webViewLink: saved.webViewLink,
+      };
+    }
+
+    if (localDriveConfig.mode === 'both') {
+      const localSaved = await saveScanFileToLocalDriveAndServer(file);
+      const token = getAccessToken();
+      if (token && connection && !isDemoMode) {
+        const driveUploaded = await uploadScanFileToDrive(
+          token,
+          connection.driveFolderId,
+          file
+        );
+        return driveUploaded;
+      }
+      return {
+        id: localSaved.id,
+        name: localSaved.name,
+        webViewLink: localSaved.webViewLink,
+      };
+    }
+
     const token = getAccessToken();
     if (!token || !connection) {
       throw new Error('ກະລຸນາເຂົ້າສູ່ລະບົບ Google ກ່ອນອັບໂຫຼດຟາຍ');
@@ -760,14 +947,19 @@ export default function App() {
       updatedAt: new Date().toISOString(),
     };
 
-    if (isDemoMode) {
-      setDocuments((prev) => [newRecord, ...prev]);
-      realtimeClient.emitCreated('demo', newRecord);
+    if (isDemoMode || localDriveConfig.mode === 'local_drive') {
+      const nextDocs = [newRecord, ...documentsRef.current];
+      setDocuments(nextDocs);
+      realtimeClient.emitCreated(activeRoomId || 'demo', newRecord);
+      await syncLocalDriveIfEnabled(nextDocs);
       setFormOpen(false);
       showToast({
         variant: 'success',
         title: 'ບັນທຶກສຳເລັດ',
-        description: `ບັນທຶກເອກະສານ "${newRecord.docNumber}" ສຳເລັດແລ້ວ`,
+        description:
+          localDriveConfig.mode === 'local_drive'
+            ? `ບັນທຶກ "${newRecord.docNumber}" ລົງ Excel / Drive D: ແລ້ວ`
+            : `ບັນທຶກເອກະສານ "${newRecord.docNumber}" ສຳເລັດແລ້ວ`,
       });
       return;
     }
@@ -790,6 +982,7 @@ export default function App() {
       await appendDocumentToSheet(token, connection, newRecord);
       const updatedRows = await fetchDocumentsFromSheet(token, connection);
       setDocuments(updatedRows);
+      await syncLocalDriveIfEnabled(updatedRows);
       const syncedRecord = updatedRows.find((r) => r.id === newRecord.id) ?? newRecord;
       realtimeClient.emitCreated(connection.spreadsheetId, syncedRecord);
       setFormOpen(false);
@@ -839,11 +1032,13 @@ export default function App() {
         updatedAt: new Date().toISOString(),
       };
 
-      if (isDemoMode) {
-        setDocuments((prev) =>
-          prev.map((item) => (item.id === updated.id ? updated : item))
+      if (isDemoMode || localDriveConfig.mode === 'local_drive') {
+        const nextDocs = documentsRef.current.map((item) =>
+          item.id === updated.id ? updated : item
         );
-        realtimeClient.emitUpdated('demo', updated);
+        setDocuments(nextDocs);
+        realtimeClient.emitUpdated(activeRoomId || 'demo', updated);
+        await syncLocalDriveIfEnabled(nextDocs);
         setPendingMutation(null);
         showToast({
           variant: 'success',
@@ -872,6 +1067,7 @@ export default function App() {
         await updateDocumentInSheet(token, connection, updated);
         const refreshed = await fetchDocumentsFromSheet(token, connection);
         setDocuments(refreshed);
+        await syncLocalDriveIfEnabled(refreshed);
         const syncedUpdated = refreshed.find((r) => r.id === updated.id) ?? updated;
         realtimeClient.emitUpdated(connection.spreadsheetId, syncedUpdated);
         setPendingMutation(null);
@@ -911,9 +1107,11 @@ export default function App() {
     if (pendingMutation.type === 'delete') {
       const target = pendingMutation.record;
 
-      if (isDemoMode) {
-        setDocuments((prev) => prev.filter((item) => item.id !== target.id));
-        realtimeClient.emitDeleted('demo', target.id);
+      if (isDemoMode || localDriveConfig.mode === 'local_drive') {
+        const nextDocs = documentsRef.current.filter((item) => item.id !== target.id);
+        setDocuments(nextDocs);
+        realtimeClient.emitDeleted(activeRoomId || 'demo', target.id);
+        await syncLocalDriveIfEnabled(nextDocs);
         setPendingMutation(null);
         showToast({
           variant: 'success',
@@ -949,6 +1147,7 @@ export default function App() {
         }
         const refreshed = await fetchDocumentsFromSheet(token, connection);
         setDocuments(refreshed);
+        await syncLocalDriveIfEnabled(refreshed);
         realtimeClient.emitDeleted(connection.spreadsheetId, target.id);
         setPendingMutation(null);
         showToast({
@@ -1113,6 +1312,50 @@ export default function App() {
     });
   };
 
+  const handleExportExcel = () => {
+    const filename = triggerExcelDownload(filteredDocuments, 'documents');
+    showToast({
+      variant: 'success',
+      title: 'ສົ່ງອອກ Excel (.xlsx) ສຳເລັດ',
+      description: `${filename} · ${filteredDocuments.length} ລາຍການ`,
+    });
+  };
+
+  const handleSyncLocalExcel = async () => {
+    setIsSyncing(true);
+    try {
+      const result = await syncDocumentsToLocalDriveAndServer(
+        documents,
+        localDriveConfig
+      );
+      const nextCfg: LocalDriveConfig = {
+        ...localDriveConfig,
+        lastLocalSyncAt: result.syncedAt,
+      };
+      setLocalDriveConfig(nextCfg);
+      saveLocalDriveConfig(nextCfg);
+      showToast({
+        variant: 'success',
+        title: 'ຊິ້ງຂໍ້ມູນລົງ Excel (.xlsx) ສຳເລັດ',
+        description: result.wroteDirectoryHandle
+          ? `ຂຽນລົງໂຟນເດີ ${localDriveConfig.linkedFolderName || 'Drive D:'} ແລະ Server ແລ້ວ`
+          : `ບັນທຶກ ${documents.length} ລາຍການລົງ Excel backup ແລ້ວ`,
+      });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleImportExcelDocuments = async (importedDocs: DocumentRecord[]) => {
+    setDocuments(importedDocs);
+    await syncDocumentsToLocalDriveAndServer(importedDocs, localDriveConfig);
+    showToast({
+      variant: 'success',
+      title: 'ນຳເຂົ້າຂໍ້ມູນຈາກ Excel ສຳເລັດ',
+      description: `ໂຫຼດ ${importedDocs.length} ລາຍການຈາກຟາຍ .xlsx`,
+    });
+  };
+
   if (needsAuth && !isDemoMode) {
     return (
       <>
@@ -1121,6 +1364,53 @@ export default function App() {
           onEnterDemo={handleEnterDemo}
           isLoggingIn={isLoggingIn}
           errorMessage={authError}
+          theme={theme}
+          onToggleTheme={handleToggleTheme}
+        />
+        <ToastViewport toasts={toasts} onDismiss={handleDismissToast} />
+      </>
+    );
+  }
+
+  if (!isDemoMode && user && !isAccessGranted) {
+    if (accessChecking) {
+      return (
+        <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-6 text-sm text-slate-600 dark:text-slate-300">
+          ກຳລັງກວດສອບສິດການເຂົ້າໃຊ້ງານກັບ Admin ({user.email})...
+        </div>
+      );
+    }
+
+    return (
+      <>
+        <AccessApprovalScreen
+          userEmail={user.email || ''}
+          userDisplayName={user.displayName || ''}
+          userPhotoUrl={user.photoURL || ''}
+          gateState={userAccessGate as 'needs_request' | 'pending' | 'rejected' | 'unverified'}
+          existingRequest={ownAccessRequest}
+          isSubmitting={isSubmittingAccessRequest}
+          onSubmitRequest={async (reason) => {
+            setIsSubmittingAccessRequest(true);
+            try {
+              await submitOrUpdateAccessRequest({
+                uid: user.uid,
+                email: user.email || '',
+                displayName: user.displayName,
+                photoURL: user.photoURL,
+                reason,
+              });
+              showToast({
+                variant: 'success',
+                title: 'ສົ່ງຄຳຂໍອະນຸມັດສຳເລັດ',
+                description: 'ກະລຸນາລໍຖ້າ Admin (chanthathonglith@gmail.com) ອະນຸມັດ',
+              });
+            } finally {
+              setIsSubmittingAccessRequest(false);
+            }
+          }}
+          onLogout={handleLogout}
+          onEnterDemo={handleEnterDemo}
           theme={theme}
           onToggleTheme={handleToggleTheme}
         />
@@ -1149,16 +1439,20 @@ export default function App() {
       : DocumentDirection.INCOMING;
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex transition-colors">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 flex transition-colors print:hidden">
       <Sidebar
         activeSection={activeSection}
         onSelectSection={handleSelectSection}
         stats={stats}
         isDemoMode={isDemoMode}
+        isSoleAdmin={isSoleAdmin}
+        pendingApprovalsCount={pendingApprovalsCount}
         userEmail={user?.email || null}
         userDisplayName={user?.displayName || null}
         userPhotoUrl={user?.photoURL || null}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenQrScanner={() => setQrScannerOpen(true)}
+        onOpenAdminApprovals={() => setAdminApprovalsOpen(true)}
         onLogout={handleLogout}
         onRequestGoogleLogin={handleGoogleLogin}
         mobileOpen={mobileMenuOpen}
@@ -1183,6 +1477,31 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+            {isSoleAdmin && (
+              <button
+                type="button"
+                onClick={() => setAdminApprovalsOpen(true)}
+                data-testid="header-admin-approvals-btn"
+                className="hidden md:inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] text-xs font-semibold text-blue-800 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/60 rounded-lg whitespace-nowrap"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
+                <span>
+                  Admin{pendingApprovalsCount > 0 ? ` (${pendingApprovalsCount})` : ''}
+                </span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setQrScannerOpen(true)}
+              data-testid="header-qr-scanner-btn"
+              aria-label="ສະແກນ QR Code ເປີດເອກະສານ"
+              className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] text-xs font-semibold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg whitespace-nowrap"
+            >
+              <QrCode className="w-4 h-4 text-blue-700 dark:text-blue-400" aria-hidden="true" />
+              <span className="hidden sm:inline">ສະແກນ QR</span>
+            </button>
+
             {!isDemoMode && connection && (
               <a
                 href={connection.spreadsheetUrl}
@@ -1374,6 +1693,8 @@ export default function App() {
                   setActiveSection('all');
                 }}
                 onExportCsv={handleExportCsv}
+                onExportExcel={handleExportExcel}
+                onOpenQrScanner={() => setQrScannerOpen(true)}
               />
 
               <DocumentList
@@ -1400,6 +1721,7 @@ export default function App() {
         initialRecord={editingRecord}
         defaultDirection={defaultFormDirection}
         isDemoMode={isDemoMode}
+        storageMode={localDriveConfig.mode}
         isSubmitting={isMutating}
         onUploadFileToDrive={handleUploadFileToDrive}
         onNotifyToast={showToast}
@@ -1415,16 +1737,90 @@ export default function App() {
         onDelete={handleRequestDelete}
       />
 
+      <QrScannerModal
+        open={qrScannerOpen}
+        documents={documents}
+        onSelectDocument={(doc) => setViewingRecord(doc)}
+        onClose={() => setQrScannerOpen(false)}
+      />
+
       <WorkspaceSettingsModal
         open={settingsOpen}
         isDemoMode={isDemoMode}
         connection={connection}
+        localConfig={localDriveConfig}
+        documents={documents}
         isBusy={isSyncing}
+        onUpdateLocalConfig={(next) => {
+          setLocalDriveConfig(next);
+          saveLocalDriveConfig(next);
+        }}
+        onSyncLocalExcel={handleSyncLocalExcel}
+        onDownloadExcel={handleExportExcel}
+        onImportExcelDocuments={handleImportExcelDocuments}
         onLinkSpreadsheetId={handleLinkSpreadsheetId}
         onCreateNewSpreadsheet={handleCreateNewSpreadsheet}
         onRefreshSync={handleRefreshSync}
         onClose={() => setSettingsOpen(false)}
       />
+
+      {isSoleAdmin && (
+        <AdminApprovalsModal
+          open={adminApprovalsOpen}
+          adminEmail={user?.email || 'chanthathonglith@gmail.com'}
+          requests={adminRequests}
+          sharedConfig={sharedWorkspaceConfig}
+          currentSpreadsheetId={connection?.spreadsheetId}
+          currentSpreadsheetTitle={connection?.spreadsheetTitle}
+          onApprove={async (uid, note) => {
+            await reviewAccessRequest({
+              uid,
+              status: 'approved',
+              adminEmail: user?.email || 'chanthathonglith@gmail.com',
+              adminNote: note,
+            });
+            showToast({
+              variant: 'success',
+              title: 'ອະນຸມັດຜູ້ໃຊ້ສຳເລັດ',
+            });
+          }}
+          onReject={async (uid, note) => {
+            await reviewAccessRequest({
+              uid,
+              status: 'rejected',
+              adminEmail: user?.email || 'chanthathonglith@gmail.com',
+              adminNote: note,
+            });
+            showToast({
+              variant: 'info',
+              title: 'ປະຕິເສດຄຳຂໍແລ້ວ',
+            });
+          }}
+          onDeleteRequest={async (uid) => {
+            await removeAccessRequest(uid);
+            showToast({
+              variant: 'info',
+              title: 'ລຶບລາຍການຄຳຂໍແລ້ວ',
+            });
+          }}
+          onPublishSharedSheet={async () => {
+            if (!connection) return;
+            await saveSharedWorkspaceConfig({
+              spreadsheetId: connection.spreadsheetId,
+              spreadsheetTitle: connection.spreadsheetTitle,
+              adminEmail: user?.email || 'chanthathonglith@gmail.com',
+            });
+            const latest = await fetchSharedWorkspaceConfig();
+            setSharedWorkspaceConfig(latest);
+            showToast({
+              variant: 'success',
+              title: 'ແຊຣ໌ Google Sheet ໃຫ້ທີມສຳເລັດ',
+              description: connection.spreadsheetTitle,
+            });
+          }}
+          onClose={() => setAdminApprovalsOpen(false)}
+        />
+      )}
 
       <NotificationModal
         open={notificationsOpen}

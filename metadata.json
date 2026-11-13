@@ -1,6 +1,6 @@
 {
   "name": "ລະບົບຈັດການເອກະສານຂາເຂົ້າ-ຂາອອກ",
   "description": "ລະບົບຄຸ້ມຄອງເອກະສານຂາເຂົ້າ-ຂາອອກ ແລະ ຈັດເກັບຟາຍສະແກນ ເຊື່ອມຕໍ່ Google Sheets ແລະ Google Drive ພ້ອມລະບົບເຂົ້າສູ່ລະບົບດ້ວຍ Google Account.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

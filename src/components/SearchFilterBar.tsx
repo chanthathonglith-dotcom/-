@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, RotateCcw, Search, SlidersHorizontal } from 'lucide-react';
+import { Download, FileSpreadsheet, QrCode, RotateCcw, Search, SlidersHorizontal } from 'lucide-react';
 import {
   DIRECTION_LABELS,
   DocumentDirection,
@@ -18,6 +18,8 @@ interface SearchFilterBarProps {
   onChange: (next: DocumentFilters) => void;
   onReset: () => void;
   onExportCsv: () => void;
+  onExportExcel?: () => void;
+  onOpenQrScanner?: () => void;
 }
 
 export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
@@ -26,6 +28,8 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
   onChange,
   onReset,
   onExportCsv,
+  onExportExcel,
+  onOpenQrScanner,
 }) => {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
@@ -60,7 +64,7 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
             type="search"
             value={filters.query}
             onChange={(e) => onChange({ ...filters, query: e.target.value })}
-            placeholder="ຄົ້ນຫາເລກທີ, ຫົວຂໍ້, ພາກສ່ວນ ຫຼື ຄຳເຫັນຂອງການນຳ..."
+            placeholder="ຄົ້ນຫາເລກທີຂາເຂົ້າ-ຂາອອກ, ຫົວຂໍ້, ພາກສ່ວນ ຫຼື ຄຳເຫັນ..."
             className="w-full pl-10 pr-4 py-2 min-h-[42px] text-sm bg-slate-50 dark:bg-slate-800/80 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 border border-slate-200 dark:border-slate-700 rounded-lg focus:bg-white dark:focus:bg-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600/20 focus:border-blue-700 dark:focus:border-blue-500"
           />
         </div>
@@ -117,6 +121,31 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
             </span>
           </button>
 
+          {onOpenQrScanner && (
+            <button
+              type="button"
+              onClick={onOpenQrScanner}
+              data-testid="searchbar-qr-scanner-btn"
+              className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] text-xs font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/60 rounded-lg transition-colors whitespace-nowrap"
+            >
+              <QrCode className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <span>ສະແກນ QR</span>
+            </button>
+          )}
+
+          {onExportExcel && (
+            <button
+              type="button"
+              onClick={onExportExcel}
+              disabled={totalResults === 0}
+              data-testid="export-excel-btn"
+              className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] text-xs font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50/70 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 disabled:opacity-50 rounded-lg transition-colors whitespace-nowrap"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+              <span>ສົ່ງອອກ Excel</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={onExportCsv}
@@ -124,7 +153,7 @@ export const SearchFilterBar: React.FC<SearchFilterBarProps> = ({
             className="inline-flex items-center gap-1.5 px-3 py-2 min-h-[40px] text-xs font-medium text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 rounded-lg transition-colors whitespace-nowrap"
           >
             <Download className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-            <span>ສົ່ງອອກ CSV</span>
+            <span>CSV</span>
           </button>
         </div>
       </div>

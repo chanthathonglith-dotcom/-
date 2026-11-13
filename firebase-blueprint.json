@@ -1,0 +1,124 @@
+{
+  "entities": {
+    "AccessRequest": {
+      "title": "AccessRequest",
+      "description": "User access request and approval status managed exclusively by the sole Admin (chanthathonglith@gmail.com).",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Firebase Auth UID of the requesting user."
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 254,
+          "description": "Verified Google account email address."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 120,
+          "description": "User display name from Google profile."
+        },
+        "photoURL": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 500,
+          "description": "User avatar URL from Google profile."
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300,
+          "description": "Department or purpose note submitted with access request."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "approved", "rejected"],
+          "description": "Current approval state controlled exclusively by Admin."
+        },
+        "reviewedByEmail": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 254,
+          "description": "Admin email that last reviewed the request."
+        },
+        "adminNote": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 300,
+          "description": "Optional note recorded by Admin upon approval or rejection."
+        },
+        "requestedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the request was first created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of the latest modification."
+        }
+      },
+      "required": [
+        "uid",
+        "email",
+        "displayName",
+        "photoURL",
+        "reason",
+        "status",
+        "reviewedByEmail",
+        "adminNote",
+        "requestedAt",
+        "updatedAt"
+      ]
+    },
+    "WorkspaceConfig": {
+      "title": "WorkspaceConfig",
+      "description": "Shared Google Spreadsheet reference published by Admin for approved team members.",
+      "type": "object",
+      "properties": {
+        "spreadsheetId": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200,
+          "description": "Google Spreadsheet ID shared across approved accounts."
+        },
+        "spreadsheetTitle": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 200,
+          "description": "Human-readable spreadsheet title."
+        },
+        "updatedByEmail": {
+          "type": "string",
+          "format": "email",
+          "minLength": 3,
+          "maxLength": 254,
+          "description": "Admin email that saved the shared configuration."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update."
+        }
+      },
+      "required": ["spreadsheetId", "spreadsheetTitle", "updatedByEmail", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/accessRequests/{userId}": {
+      "schema": { "$ref": "#/entities/AccessRequest" },
+      "description": "Per-user access approval documents keyed by Firebase UID."
+    },
+    "/workspaceConfig/{configId}": {
+      "schema": { "$ref": "#/entities/WorkspaceConfig" },
+      "description": "Shared workspace configuration document readable by approved users and writable only by sole Admin."
+    }
+  }
+}

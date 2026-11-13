@@ -36,6 +36,7 @@ export const SHEET_HEADERS = [
   'ຜູ້ອະນຸມັດ (ລົງນາມ)',
   'ລາຍເຊັນດິຈິຕອນ (Data URL)',
   'ວັນທີລົງນາມ',
+  'ເລກທີເອກະສານຂາອອກ',
 ] as const;
 
 export function getEffectiveIncomingDate(
@@ -109,7 +110,9 @@ export function filterDocuments(
 
     if (normalizedQuery) {
       const searchable = [
+        doc.id,
         doc.docNumber,
+        doc.outgoingDocNumber ?? '',
         doc.title,
         doc.department,
         doc.leadershipComment,
@@ -232,7 +235,7 @@ export function validateDocumentInput(input: DocumentInput): ValidationErrors {
   }
 
   const trimmedLink = input.scanLink.trim();
-  if (trimmedLink && !/^https?:\/\/|^blob:|^data:/i.test(trimmedLink)) {
+  if (trimmedLink && !/^https?:\/\/|^blob:|^data:|^\//i.test(trimmedLink)) {
     errors.scanLink = 'ລິ້ງເອກະສານຕ້ອງຂຶ້ນຕົ້ນດ້ວຍ https:// ຫຼື http://';
   }
 
@@ -320,6 +323,7 @@ export function documentToSheetRow(doc: DocumentRecord): string[] {
     (doc.approverName ?? '').trim(),
     (doc.signatureDataUrl ?? '').trim(),
     (doc.signedAt ?? '').trim(),
+    (doc.outgoingDocNumber ?? '').trim(),
   ];
 }
 
@@ -351,6 +355,7 @@ export function sheetRowsToDocuments(rows: string[][]): DocumentRecord[] {
       id,
       direction,
       docNumber: (row[2] ?? '').trim(),
+      outgoingDocNumber: (row[20] ?? '').trim(),
       docDate: docDate || incomingDate || outgoingDate,
       incomingDate,
       outgoingDate,

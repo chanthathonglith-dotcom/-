@@ -115,6 +115,7 @@ export function areDocumentRecordsEqual(a: DocumentRecord, b: DocumentRecord): b
     a.id === b.id &&
     a.direction === b.direction &&
     a.docNumber === b.docNumber &&
+    (a.outgoingDocNumber ?? '') === (b.outgoingDocNumber ?? '') &&
     a.docDate === b.docDate &&
     (a.incomingDate ?? '') === (b.incomingDate ?? '') &&
     (a.outgoingDate ?? '') === (b.outgoingDate ?? '') &&
@@ -296,6 +297,7 @@ export function parseSheetRowsServerSafe(rows: string[][]): DocumentRecord[] {
       id,
       direction,
       docNumber: (row[2] ?? '').trim(),
+      outgoingDocNumber: (row[20] ?? '').trim(),
       docDate: docDate || incomingDate || outgoingDate,
       incomingDate,
       outgoingDate,

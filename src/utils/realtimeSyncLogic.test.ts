@@ -173,11 +173,13 @@ test('parseSheetRowsServerSafe parses 20-col sheet rows with signature fields ac
       'ທ່ານ ຄຳພັນ',
       'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ',
       '2026-11-12T10:05:00.000Z',
+      '305/ຂອ-2026',
     ],
   ];
   const parsed = parseSheetRowsServerSafe(rows);
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].direction, DocumentDirection.OUTGOING);
+  assert.equal(parsed[0].outgoingDocNumber, '305/ຂອ-2026');
   assert.equal(parsed[0].incomingDate, '2026-11-11');
   assert.equal(parsed[0].outgoingDate, '2026-11-12');
   assert.equal(parsed[0].status, DocumentStatus.COMPLETED);
@@ -192,6 +194,7 @@ test('parseSheetRowsServerSafe parses 20-col sheet rows with signature fields ac
   const signedDiff = computeDocumentDiff([baseDoc1], [
     {
       ...baseDoc1,
+      outgoingDocNumber: '305/ຂອ-2026',
       approverName: 'ທ່ານ ຄຳພັນ',
       signatureDataUrl: 'data:image/png;base64,AAAA',
     },
